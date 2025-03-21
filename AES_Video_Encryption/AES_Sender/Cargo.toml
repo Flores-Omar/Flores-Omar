@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rscam = "0.5"
+aes = "0.8"
+cipher = "0.4"
+rand = "0.8"
