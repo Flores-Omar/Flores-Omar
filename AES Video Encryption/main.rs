@@ -1,13 +1,14 @@
-use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
+use rscam::{Camera, Config};
 use aes::{Aes128, Aes192, Aes256};
-use aes::cipher::{KeyIvInit, BlockDecrypt, StreamCipher, generic_array::GenericArray};
+use aes::cipher::{BlockEncrypt, KeyIvInit, generic_array::GenericArray};
+use aes::cipher::{StreamCipher, NewCipher};
+use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::block_modes::{Cbc, Cfb, Ofb, Ecb};
 use aes::cipher::stream::Ctr128;
-use opencv::{prelude::*, imgcodecs, highgui, imgproc};
 use rand::{thread_rng, Rng};
+use std::net::UdpSocket;
 
-// LFSR for Key Generation
+// Define LFSR for key generation
 fn lfsr(seed: u32, taps: u32, size: usize) -> Vec<u8> {
     let mut state = seed;
     let mut output = Vec::new();
@@ -19,47 +20,83 @@ fn lfsr(seed: u32, taps: u32, size: usize) -> Vec<u8> {
     output
 }
 
-// Decryption Function
-fn decrypt_data(buffer: &mut Vec<u8>, key: &[u8], iv: &[u8], mode: &str, key_size: usize) {
+fn encrypt_data(buffer: &mut Vec<u8>, key: &[u8], iv: &[u8], mode: &str, key_size: usize) {
     match (mode, key_size) {
-        ("CBC", 16) => { /* CBC AES-128 decryption here */ }
-        ("CBC", 24) => { /* CBC AES-192 decryption here */ }
-        ("CBC", 32) => { /* CBC AES-256 decryption here */ }
-        ("CFB", 16) => { /* CFB AES-128 decryption here */ }
-        ("CFB", 24) => { /* CFB AES-192 decryption here */ }
-        ("CFB", 32) => { /* CFB AES-256 decryption here */ }
-        ("OFB", 16) => { /* OFB AES-128 decryption here */ }
-        ("OFB", 24) => { /* OFB AES-192 decryption here */ }
-        ("OFB", 32) => { /* OFB AES-256 decryption here */ }
-        ("CTR", 16) => { /* CTR AES-128 decryption here */ }
-        ("CTR", 24) => { /* CTR AES-192 decryption here */ }
-        ("CTR", 32) => { /* CTR AES-256 decryption here */ }
+        ("CBC", 16) => {
+            let cipher = Cbc::<Aes128, Pkcs7>::new_from_slices(key, iv).unwrap();
+            *buffer = cipher.encrypt_vec(buffer);
+        },
+        ("CBC", 24) => {
+            let cipher = Cbc::<Aes192, Pkcs7>::new_from_slices(key, iv).unwrap();
+            *buffer = cipher.encrypt_vec(buffer);
+        },
+        ("CBC", 32) => {
+            let cipher = Cbc::<Aes256, Pkcs7>::new_from_slices(key, iv).unwrap();
+            *buffer = cipher.encrypt_vec(buffer);
+        },
+        ("CFB", 16) => {
+            let mut cipher = Cfb::<Aes128>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("CFB", 24) => {
+            let mut cipher = Cfb::<Aes192>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("CFB", 32) => {
+            let mut cipher = Cfb::<Aes256>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("OFB", 16) => {
+            let mut cipher = Ofb::<Aes128>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("OFB", 24) => {
+            let mut cipher = Ofb::<Aes192>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("OFB", 32) => {
+            let mut cipher = Ofb::<Aes256>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("CTR", 16) => {
+            let mut cipher = Ctr128::<Aes128>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("CTR", 24) => {
+            let mut cipher = Ctr128::<Aes192>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
+        ("CTR", 32) => {
+            let mut cipher = Ctr128::<Aes256>::new_from_slices(key, iv).unwrap();
+            cipher.apply_keystream(buffer);
+        },
         _ => panic!("Unsupported mode or key size"),
     }
 }
 
 fn main() {
-    let socket = UdpSocket::bind("0.0.0.0:8081").expect("Could not bind UDP socket");
-    let key_size = 32;  // Must match sender (16, 24, or 32 for AES-128, AES-192, AES-256)
-    let encryption_mode = "CBC";  // Must match sender's mode
+    let mut camera = Camera::new("/dev/video0").expect("Failed to open camera");
+    camera.start(&Config {
+        interval: (1, 30),
+        resolution: (640, 480),
+        format: b"YUYV",
+        ..Default::default()
+    }).expect("Failed to start camera");
 
-    highgui::named_window("Decrypted Video", highgui::WINDOW_AUTOSIZE).unwrap();
+    let socket = UdpSocket::bind("0.0.0.0:8080").expect("Could not bind UDP socket");
+    let target_addr = "192.168.1.100:8081";
 
-    let mut buffer = vec![0; 65535]; // Large buffer for UDP packets
+    let key_size = 32; // Change between 16 (AES-128), 24 (AES-192), and 32 (AES-256)
+    let encryption_mode = "CBC"; // Change between "CBC", "CFB", "OFB", "CTR"
 
     loop {
-        let (size, _) = socket.recv_from(&mut buffer).expect("Failed to receive data");
-        let mut frame_data = buffer[..size].to_vec();
-
+        let frame = camera.capture().expect("Failed to capture frame");
         let key = lfsr(0b10101010101010101010101010101010, 0b101, key_size);
         let iv = lfsr(0b11001100110011001100110011001100, 0b110, 16);
-
-        decrypt_data(&mut frame_data, &key, &iv, encryption_mode, key_size);
-
-        let image = imgcodecs::imdecode(&frame_data, imgcodecs::IMREAD_COLOR)
-            .expect("Failed to decode image");
-
-        highgui::imshow("Decrypted Video", &image).unwrap();
-        highgui::wait_key(1).unwrap();
+        let mut buffer = frame.to_vec();
+        
+        encrypt_data(&mut buffer, &key, &iv, encryption_mode, key_size);
+        
+        socket.send_to(&buffer, target_addr).expect("Failed to send data");
     }
 }
