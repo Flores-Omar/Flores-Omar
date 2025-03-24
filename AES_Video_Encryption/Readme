@@ -1,1 +1,6 @@
-
+Step 1: python video_sender.py
+-on Raspberry PI
+Step 2: scp omarf@192.168.202.172:/home/omarf/Documents/AES_Sender/aes_key.bin "C:/Users/omarf/OneDrive/Desktop/College HW/ECE4301/Midterm1_PY/aes_key.bin"
+-on VS code terminal
+Step 3: Password: Screw3!
+Step 4: python receiver.py
